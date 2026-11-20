@@ -133,7 +133,101 @@ CREATE TABLE IF NOT EXISTS reject_slips(
   reason TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+-- 建窗校验册：钉死甲路径（整笔拒绝），当日禁止改口（见触发器）。
+-- 不设 window_draft 表：乙路径已废弃，甲乙不得混用。
+CREATE TABLE IF NOT EXISTS window_create_registry(
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  chosen_path TEXT NOT NULL CHECK (chosen_path IN ('甲','乙')),
+  active INTEGER NOT NULL CHECK (active IN (0,1)),
+  chosen_date TEXT NOT NULL,
+  note TEXT
+);
+CREATE TRIGGER IF NOT EXISTS trg_registry_no_flip_today
+BEFORE UPDATE OF chosen_path ON window_create_registry
+WHEN OLD.chosen_date = date('now') AND NEW.chosen_path <> OLD.chosen_path
+BEGIN
+  SELECT RAISE(ABORT, '建窗校验册当日禁止改口');
+END;
 """
+
+# 校验册固定单行 id；甲路径为唯一在用口径。
+REGISTRY_ROW_ID = 1
+CHOSEN_PATH = "甲"
+
+
+class WindowReject(Exception):
+    """建窗整笔拒绝（甲路径）：携带原因，调用方写 window_create_reject 审计。"""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+class RegistryDeviation(Exception):
+    """校验册偏离：拒写并记「建窗偏了」。"""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def validate_window_payload(
+    conn: sqlite3.Connection, name: str, open_at: str, close_at: str
+) -> None:
+    """甲路径创建前整笔校验。不过则抛 WindowReject，调用方保证 windows 零增。
+
+    与种子装载路径共用，保证「夹具同态」。
+    """
+    if not name or not str(name).strip():
+        raise WindowReject("窗口名不能为空")
+    if not open_at or not close_at:
+        raise WindowReject("开启/关闭时间不能为空")
+    # 严格 open < close：相等或倒挂（open 晚于 close）一律拒绝。
+    if not (open_at < close_at):
+        raise WindowReject(f"时间倒挂：open_at({open_at}) 必须早于 close_at({close_at})")
+    dup = conn.execute(
+        "SELECT id, generation FROM windows WHERE name=?", (name,)
+    ).fetchone()
+    if dup is not None:
+        # 重名不得覆盖旧世代。
+        raise WindowReject(
+            f"窗口重名：{name} 已存在(id={dup['id']}, generation={dup['generation']})，禁止覆盖旧世代"
+        )
+
+
+def ensure_registry(conn: sqlite3.Connection) -> None:
+    """初始化并钉死校验册为甲路径；已存在则不覆盖当日选择。"""
+    from datetime import date
+
+    row = conn.execute(
+        "SELECT id FROM window_create_registry WHERE id=?", (REGISTRY_ROW_ID,)
+    ).fetchone()
+    if row is None:
+        conn.execute(
+            """INSERT INTO window_create_registry(id,chosen_path,active,chosen_date,note)
+               VALUES (?,?,?,?,?)""",
+            (
+                REGISTRY_ROW_ID,
+                CHOSEN_PATH,
+                1,
+                date.today().isoformat(),
+                "甲路径：时间倒挂/重名整笔拒绝，windows 零增并写审计；不引入 window_draft",
+            ),
+        )
+
+
+def assert_registry_pins_path_a(conn: sqlite3.Connection) -> None:
+    """写路径闸门：校验册偏离即抛 RegistryDeviation（调用方记「建窗偏了」并拒写）。"""
+    row = conn.execute(
+        "SELECT chosen_path, active FROM window_create_registry WHERE id=?",
+        (REGISTRY_ROW_ID,),
+    ).fetchone()
+    if row is None:
+        raise RegistryDeviation("建窗校验册缺失")
+    if row["active"] != 1 or row["chosen_path"] != CHOSEN_PATH:
+        raise RegistryDeviation(
+            f"校验册偏离：active={row['active']}, chosen_path={row['chosen_path']}"
+        )
 
 
 def ensure_users(conn: sqlite3.Connection) -> None:
@@ -186,6 +280,21 @@ def seed_if_empty(conn: sqlite3.Connection) -> None:
         },
     ]
     for w in windows:
+        # 种子夹具与 API 建窗走同一校验（五处同态之「种子夹具」）：
+        # 倒挂/重名整笔拒绝，跳过该行并写 window_create_reject，不污染正式表。
+        try:
+            validate_window_payload(
+                conn, w["name"], w["open_at"], w["close_at"]
+            )
+        except WindowReject as exc:
+            write_audit(
+                conn,
+                "system",
+                "window_create_reject",
+                w.get("name"),
+                {"source": "seed", "reason": exc.reason},
+            )
+            continue
         conn.execute(
             "INSERT INTO windows(name,open_at,close_at,status,generation) VALUES (?,?,?,?,?)",
             (
@@ -254,6 +363,7 @@ def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
         ensure_users(conn)
+        ensure_registry(conn)
         seed_if_empty(conn)
         conn.commit()
 

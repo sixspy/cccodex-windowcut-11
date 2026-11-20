@@ -1,5 +1,13 @@
-/** 业务窗页签模板片段 */
 export const windowsViewTemplate = `
+<div class="card wide" v-show="tab===0">
+  <h2>新建业务窗</h2>
+  <p class="muted">服务端甲路径钉死：open_at 必须早于 close_at，名称不得重名；非法整笔拒绝、正式窗零增并写审计。前端提示仅辅助，以服务端写路径为准。</p>
+  <label>窗口名</label><input v-model="winForm.name" placeholder="如 W-1104"/>
+  <label>开启时间 open_at</label><input v-model="winForm.open_at" placeholder="2026-11-04T00:00:00"/>
+  <label>关闭时间 close_at</label><input v-model="winForm.close_at" placeholder="2026-11-04T23:59:59"/>
+  <button class="primary" @click="createWindow">建窗</button>
+  <div class="err">{{actionErr}}</div>
+</div>
 <div class="card wide" v-show="tab===0">
   <h2>窗口条带</h2>
   <p class="muted">关窗占窗锁；后到争用只记审计。关窗后才能物化。</p>

@@ -31,6 +31,17 @@
 
 开窗关窗、迟到策略、窗重开、部分物化失败回滚、旁路暂存 vs 拒收、争用锁与审计。
 
+## 建窗校验（甲路径，钉死）
+
+口径见 `docs/建窗校验册.md`，落库于 `window_create_registry` 单行（`chosen_path='甲'`，当日触发器禁止改口）：
+
+- 创建前整笔校验：严格 `open_at < close_at`（倒挂/相等拒绝），名称不得重名（禁止覆盖旧世代）。
+- 非法即**整笔拒绝、`windows` 零增**，写审计 `window_create_reject`（HTTP 400）。
+- 同名并发占建窗锁 `window_create:{name}`：后到只记争用（`contention_log` + `window_create_contention`，HTTP 409），不写业务。
+- 校验册偏离（`active=0`/口径非甲）拒写并记 `建窗偏了`（HTTP 409）。
+- 不引入 `window_draft`（乙路径废弃，甲乙不混用）；种子装载 `db.seed_if_empty` 复用同一校验函数。
+- 校验在服务端写路径钉死，前端提示仅辅助，绕过前端仍被拒绝。
+
 ## 互斥切口候选
 
 - 迟到拒收 vs 进迟到桶

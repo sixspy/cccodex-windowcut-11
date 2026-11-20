@@ -41,6 +41,11 @@ createApp({
       event_ts: "2026-11-02T18:00:00",
       amount: 2.2,
     });
+    const winForm = ref({
+      name: "",
+      open_at: "",
+      close_at: "",
+    });
     const nav = ["业务窗", "事件入账", "迟到桶", "物化台账", "对账互证", "审计争用"];
 
     function logout() {
@@ -185,6 +190,33 @@ createApp({
       await refresh();
     }
 
+    async function createWindow() {
+      actionErr.value = "";
+      // 仅前端即时提示；真正的钉死校验在服务端甲路径，绕过前端仍会被整笔拒绝。
+      const f = winForm.value;
+      if (!f.name || !f.open_at || !f.close_at) {
+        actionErr.value = "窗口名与开启/关闭时间均不能为空";
+        return;
+      }
+      if (!(f.open_at < f.close_at)) {
+        actionErr.value = "open_at 必须严格早于 close_at（倒挂/相等会被服务端整笔拒绝）";
+        return;
+      }
+      const r = await api.post("/api/windows", {
+        name: f.name,
+        open_at: f.open_at,
+        close_at: f.close_at,
+      });
+      if (!r) return;
+      if (r.ok) {
+        actionErr.value = "建窗成功：" + r.body.name + "（世代 " + r.body.generation + "）";
+        winForm.value = { name: "", open_at: "", close_at: "" };
+      } else {
+        actionErr.value = r.body.detail || "建窗失败";
+      }
+      await refresh();
+    }
+
     onMounted(() => {
       if (token.value) refresh();
     });
@@ -211,6 +243,7 @@ createApp({
       dash,
       form,
       holdForm,
+      winForm,
       actionErr,
       lateEvents: computed(() =>
         (events.value || []).filter((e) => e.disposition === "迟到桶")
@@ -226,6 +259,7 @@ createApp({
       discardLate,
       partitionStub,
       createHold,
+      createWindow,
       refresh,
     };
   },

@@ -1,0 +1,30 @@
+[
+  {
+    "name": "W-OK-1",
+    "open_at": "2026-11-05T00:00:00",
+    "close_at": "2026-11-05T23:59:59",
+    "status": "开启",
+    "generation": 1
+  },
+  {
+    "name": "W-INVERTED",
+    "open_at": "2026-11-06T23:59:59",
+    "close_at": "2026-11-06T00:00:00",
+    "status": "开启",
+    "generation": 1
+  },
+  {
+    "name": "W-DUP-A",
+    "open_at": "2026-11-07T00:00:00",
+    "close_at": "2026-11-07T23:59:59",
+    "status": "开启",
+    "generation": 1
+  },
+  {
+    "name": "W-DUP-A",
+    "open_at": "2026-11-08T00:00:00",
+    "close_at": "2026-11-08T23:59:59",
+    "status": "开启",
+    "generation": 1
+  }
+]
